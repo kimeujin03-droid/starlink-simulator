@@ -14,5 +14,5 @@ Beyond simply drawing lines, it simulates various physical phenomena occurring d
 ## How to Run
 You can run the `starlink_simulator.py` file directly to see the simulation results.
 ```bash
-python starlink_simulator.py
+python main.py
 ```
