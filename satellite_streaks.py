@@ -133,3 +133,93 @@ def add_tle_streak_DEBUG_MODE(simulator, image):
     blurred_streak = gaussian_filter(streak_layer, sigma=1.5)
     print("   ✅ DEBUG streak added.")
     return image + blurred_streak
+
+def add_random_streak_component(simulator, image, base_brightness=50000, base_width=2.5):
+    """
+    Adds a physically plausible random streak to the image without TLE calculations.
+
+    This function simulates a satellite on a linear 3D path and projects it onto
+    the 2D image plane, adjusting brightness and width based on distance and velocity.
+    """
+    streak_layer = np.zeros_like(image, dtype=np.float32)
+
+    # 1. Define a random but plausible 3D satellite path
+    # Assume a typical LEO altitude range (e.g., 400-700 km)
+    altitude_km = np.random.uniform(400, 700)
+    # Orbital velocity at this altitude (approximate)
+    velocity_kms = np.sqrt(398600 / (6371 + altitude_km)) # ~7.5 km/s
+
+    # Create a random 3D trajectory that crosses the field of view
+    # The field of view size at the satellite's altitude
+    fov_at_alt_km = 2 * altitude_km * np.tan(np.deg2rad(simulator.pixel_scale * simulator.image_size / 3600 / 2))
+    
+    # Define start and end points in 3D space (relative to observer)
+    # Start from one side of the FoV, end on the other
+    start_vec = np.random.randn(3)
+    start_vec[2] = 0 # Start on the xy-plane relative to the line of sight
+    start_vec = start_vec / np.linalg.norm(start_vec) * fov_at_alt_km * 1.5
+    end_vec = -start_vec
+
+    # Add depth (z-axis, line of sight)
+    start_vec[2] = altitude_km
+    end_vec[2] = altitude_km + np.random.uniform(-fov_at_alt_km*0.1, fov_at_alt_km*0.1) # slight change in altitude
+
+    # 2. Project the 3D path onto the 2D image plane
+    num_steps = 200
+    path_3d = np.linspace(start_vec, end_vec, num_steps)
+    
+    # Simple perspective projection
+    # Convert 3D path (km) to angular separation (degrees)
+    ra_offset = np.rad2deg(path_3d[:, 0] / path_3d[:, 2])
+    dec_offset = np.rad2deg(path_3d[:, 1] / path_3d[:, 2])
+
+    # Get center RA/Dec from WCS
+    center_ra, center_dec = simulator.wcs.wcs.crval
+
+    # Project to pixel coordinates
+    px, py = simulator.wcs.world_to_pixel_values(center_ra + ra_offset, center_dec + dec_offset)
+
+    # 3. Calculate physical properties at each point
+    distances_km = np.linalg.norm(path_3d, axis=1)
+    
+    # Angular velocity (pixels per second)
+    pixel_dist = np.sqrt(np.diff(px)**2 + np.diff(py)**2)
+    time_per_step = np.linalg.norm(end_vec - start_vec) / velocity_kms / num_steps
+    angular_velocity_pps = pixel_dist / time_per_step
+
+    # 4. Draw the streak with varying brightness and width
+    for i in range(num_steps - 1):
+        # Check if the segment is inside the image
+        if not (0 <= px[i] < simulator.image_size and 0 <= py[i] < simulator.image_size):
+            continue
+
+        # --- Physics-based adjustments ---
+        # a) Brightness depends on distance (inverse square law)
+        # Using a reference distance of 550km
+        distance_factor = (550.0 / distances_km[i])**2
+        
+        # b) Brightness depends on angular velocity (slower = brighter)
+        # A satellite moving slower across the frame deposits more light per pixel.
+        # Using a reference velocity of 50 pixels/sec
+        velocity_factor = np.clip(50.0 / angular_velocity_pps[i], 0.5, 2.0)
+
+        adjusted_brightness = base_brightness * distance_factor * velocity_factor
+
+        # c) Width can also depend on distance/brightness (optional)
+        adjusted_width = base_width * np.sqrt(distance_factor)
+
+        # Draw the line segment
+        rr, cc, val = line_aa(int(py[i]), int(px[i]), int(py[i+1]), int(px[i+1]))
+        mask = (rr >= 0) & (rr < simulator.image_size) & (cc >= 0) & (cc < simulator.image_size)
+        
+        # Apply blur for this segment to simulate width
+        segment_layer = np.zeros_like(image, dtype=np.float32)
+        segment_layer[rr[mask], cc[mask]] = val[mask] * adjusted_brightness
+        
+        # A small sigma for blurring each segment
+        if np.sum(segment_layer) > 0:
+            streak_layer += gaussian_filter(segment_layer, sigma=adjusted_width / 2.355)
+
+    print("   ✅ Physically plausible random streak added.")
+    simulator.simulation_metadata['satellite_added'] = True
+    return image + streak_layer

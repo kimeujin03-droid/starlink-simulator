@@ -4,9 +4,9 @@ from astropy.wcs import WCS
 from skyfield.api import Topos
 
 # Import the newly created modules
-from sky_objects import generate_galaxy_component, add_stars_component
-from instrument_effects import apply_psf, add_ccd_noise, add_lsst_cosmic_rays, add_blooming
-from satellite_streaks import SatelliteStreak, add_tle_streak_component
+from .sky_objects import generate_galaxy_component, add_stars_component
+from .instrument_effects import apply_psf, add_ccd_noise, add_lsst_cosmic_rays, add_blooming
+from .satellite_streaks import SatelliteStreak, add_random_streak_component
 
 class LSSTAdvancedSimulator:
     """
@@ -57,6 +57,9 @@ class LSSTAdvancedSimulator:
         # Instantiate the SatelliteStreak generator.
         self.streak_generator = SatelliteStreak(self)
         
+        # Dictionary to store metadata about the simulation run
+        self.simulation_metadata = {}
+        
         if image_size <= 0:
             raise ValueError("image_size must be a positive integer")
         print(f"LSST Advanced Simulator initialized (image size: {image_size}x{image_size})")
@@ -95,8 +98,7 @@ class LSSTAdvancedSimulator:
             include_blooming (bool): Whether to include CCD blooming effects.
             include_satellites (bool): Whether to include satellite streaks.
             satellite_probability (float): Probability (0-1) of a satellite streak appearing.
-            tle_data (list of tuples): List of TLE data tuples [(line1, line2), ...].
-            verbose (bool): Whether to print detailed status messages.
+            tle_data (list of tuples, optional): List of TLE data for TLE-based streaks. Defaults to None.
 
         Returns:
             ndarray: The final simulated image.
@@ -126,6 +128,8 @@ class LSSTAdvancedSimulator:
         if include_satellites and np.random.random() < satellite_probability:
             if tle_data:
                 final_image = add_tle_streak_component(self, final_image, tle_data)
+            else:
+                final_image = add_random_streak_component(self, final_image)
         
         # [Step 7] Add blooming effect.
         if include_blooming:
@@ -143,15 +147,3 @@ class LSSTAdvancedSimulator:
             print(status_msg)
 
         return final_image
-
-# --- Sample TLE Data for Starlink Satellites ---
-SAMPLE_TLE_DATA = {
-    'STARLINK-G4 (53.2 deg)': ( # Starlink satellite with 53.2 deg inclination, high visibility for LSST.
-        "1 53099U 22082CH  24155.50000000  .00002100  00000+0  42000-3 0  9991",
-        "2 53099  53.2173 211.2053 0001500 105.3000 254.8000 15.08200000 98001"
-    ),
-    'STARLINK-G3 (69.9 deg)': ( # Starlink satellite with 69.9 deg inclination, better for Southern Hemisphere.
-        "1 56814U 23091K   24155.50000000  .00002500  00000+0  48000-3 0  9992",
-        "2 56814  69.9980 180.0000 0001200 135.0000 225.1000 15.11500000 45008"
-    )
-}

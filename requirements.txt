@@ -1,0 +1,6 @@
+numpy
+matplotlib
+astropy
+scikit-image
+scipy
+skyfield
